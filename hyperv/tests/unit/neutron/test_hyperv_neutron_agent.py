@@ -584,3 +584,30 @@ class TestHyperVNeutronAgent(base.BaseTestCase):
         # allow the threads to finish. one second is enough for a noop call.
         time.sleep(1)
         mock_fn.assert_has_calls([mock.call(mock.sentinel.parameter)] * 8)
+
+    @mock.patch('time.sleep')
+    @mock.patch.object(hyperv_neutron_agent.HyperVNeutronAgentMixin,
+                       '_port_enable_control_metrics')
+    @mock.patch.object(hyperv_neutron_agent.HyperVNeutronAgentMixin,
+                       '_treat_devices_added')
+    @mock.patch.object(hyperv_neutron_agent.HyperVNeutronAgentMixin,
+                       '_create_event_listeners')
+    def test_daemon_loop(self, mock_create_listeners, mock_treat_dev_added,
+                         mock_port_enable_metrics, mock_sleep):
+        self.agent._nvgre_enabled = True
+        self.agent._refresh_cache = True
+        mock_port_enable_metrics.side_effect = KeyError
+        mock_sleep.side_effect = KeyboardInterrupt
+
+        self.assertRaises(KeyboardInterrupt, self.agent.daemon_loop)
+
+        self.assertFalse(self.agent._refresh_cache)
+        self.assertEqual(self.agent._utils.get_vnic_ids.return_value,
+                         self.agent._added_ports)
+        self.assertEqual(set(), self.agent._removed_ports)
+
+        mock_create_listeners.assert_called_once_with()
+        mock_treat_dev_added.assert_called_once_with()
+        self.agent._nvgre_ops.refresh_nvgre_records.assert_called_once_with()
+        mock_port_enable_metrics.assert_called_with()
+        self.agent._utils.update_cache.assert_called_once_with()
