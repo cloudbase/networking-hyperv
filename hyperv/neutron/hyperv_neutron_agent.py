@@ -84,6 +84,7 @@ networking-plugin-hyperv_agent.html
         self._utils.init_caches()
         self._network_vswitch_map = {}
         self._port_metric_retries = {}
+        self._refresh_cache = False
 
         self._nvgre_enabled = False
 
@@ -107,7 +108,6 @@ networking-plugin-hyperv_agent.html
             'enable_security_group', False)
 
         self._load_physical_network_mappings(self._phys_net_map)
-        self._init_nvgre()
         self._workers = futures.ThreadPoolExecutor(self._worker_count)
 
     def _load_physical_network_mappings(self, phys_net_vswitch_mappings):
@@ -122,7 +122,7 @@ networking-plugin-hyperv_agent.html
                 vswitch = parts[1].strip()
                 self._physical_network_mappings[pattern] = vswitch
 
-    def _init_nvgre(self):
+    def init_nvgre(self):
         # if NVGRE is enabled, self._nvgre_ops is required in order to properly
         # set the agent state (see get_agent_configrations method).
 
@@ -376,6 +376,9 @@ networking-plugin-hyperv_agent.html
             # readd the port as "added", so it can be reprocessed.
             self._added_ports.add(device)
 
+            # force cache refresh.
+            self._refresh_cache = True
+
     def _treat_devices_added(self):
         try:
             devices_details_list = self.plugin_rpc.get_devices_details_list(
@@ -450,6 +453,14 @@ networking-plugin-hyperv_agent.html
             try:
                 start = time.time()
 
+                if self._refresh_cache:
+                    # Inconsistent cache might cause exceptions. For example,
+                    # if a port has been removed, it will be known in the next
+                    # loop. Using the old switch port can cause exceptions.
+                    LOG.debug("Refreshing os_win caches...")
+                    self._utils.update_cache()
+                    self._refresh_cache = False
+
                 # notify plugin about port deltas
                 if self._added_ports:
                     LOG.debug("Agent loop has new devices!")
@@ -464,11 +475,6 @@ networking-plugin-hyperv_agent.html
                 self._port_enable_control_metrics()
             except Exception:
                 LOG.exception(_LE("Error in agent event loop"))
-
-                # inconsistent cache might cause exceptions. for example, if a
-                # port has been removed, it will be known in the next loop.
-                # using the old switch port can cause exceptions.
-                self._utils.update_cache()
 
             # sleep till end of polling interval
             elapsed = (time.time() - start)
